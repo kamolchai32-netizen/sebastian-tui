@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sebastian AI - Chat</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar: Chat History & Tools -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">◆</span>
+                    <span class="logo-text">Sebastian</span>
+                </div>
+                <button id="new-chat-btn" class="icon-btn" title="แชทใหม่">+</button>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title">เครื่องมือ</div>
+                <div class="tool-grid">
+                    <button class="tool-btn active" data-tool="chat" title="แชท">
+                        <span class="tool-icon">💬</span>
+                        <span class="tool-label">แชท</span>
+                    </button>
+                    <button class="tool-btn" data-tool="image" title="สร้างรูป">
+                        <span class="tool-icon">🎨</span>
+                        <span class="tool-label">สร้างรูป</span>
+                    </button>
+                    <button class="tool-btn" data-tool="kanban" title="กระดานงาน">
+                        <span class="tool-icon">📋</span>
+                        <span class="tool-label">งาน</span>
+                    </button>
+                    <button class="tool-btn" data-tool="files" title="ไฟล์">
+                        <span class="tool-icon">📁</span>
+                        <span class="tool-label">ไฟล์</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-title">ประวัติการคุย</div>
+                <div id="chat-history-list" class="history-list">
+                    <!-- History items injected here -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="model-selector">
+                    <select id="model-select">
+                        <option value="auto">🧠 Auto (Model Router)</option>
+                        <option value="llama3.2:3b">⚡ Llama 3.2 (Local)</option>
+                        <option value="gemma4:e2b">⚡ Gemma 4 (Local)</option>
+                        <option value="anthropic/claude-sonnet-4">🚀 Claude Sonnet</option>
+                        <option value="openai/gpt-4o">🚀 GPT-4o</option>
+                    </select>
+                </div>
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span id="status-text">พร้อมใช้งาน</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main id="main">
+            <!-- Chat Header -->
+            <header id="chat-header">
+                <button id="sidebar-toggle" class="icon-btn" title="Toggle Sidebar">☰</button>
+                <div class="header-info">
+                    <span id="current-chat-title">แชทใหม่</span>
+                    <span id="current-model-badge" class="badge">Auto</span>
+                </div>
+                <div class="header-actions">
+                    <button id="clear-chat-btn" class="icon-btn small" title="ล้างแชท">🗑️</button>
+                    <button id="export-chat-btn" class="icon-btn small" title="ส่งออกแชท">📤</button>
+                </div>
+            </header>
+
+            <!-- Messages Area -->
+            <div id="messages">
+                <div class="welcome-screen" id="welcome-screen">
+                    <div class="welcome-logo">◆</div>
+                    <h1>สวัสดี, Diamond</h1>
+                    <p>ผม Sebastian — ผู้ช่วย AI ของคุณ</p>
+                    <div class="quick-actions">
+                        <button class="quick-btn" data-prompt="ช่วยวางแผนคอนเทนต์ YouTube สัปดาห์นี้">
+                            📹 วางแผน YouTube
+                        </button>
+                        <button class="quick-btn" data-prompt="สร้างรูป Aries character สำหรับ Etsy">
+                            🎨 สร้างรูป Aries
+                        </button>
+                        <button class="quick-btn" data-prompt="ดูงานที่ค้างอยู่ในตาราง">
+                            📋 ดูงานค้าง
+                        </button>
+                        <button class="quick-btn" data-prompt="สรุปอีเมลและตารางงานวันนี้">
+                            📧 สรุปเช้า
+                        </button>
+                    </div>
+                </div>
+                <!-- Messages will be injected here -->
+            </div>
+
+            <!-- Input Area -->
+            <div id="input-area">
+                <div class="input-attachments" id="input-attachments"></div>
+                <div class="input-wrapper">
+                    <button id="attach-btn" class="icon-btn" title="แนบไฟล์/รูป">📎</button>
+                    <div class="input-box">
+                        <textarea 
+                            id="message-input" 
+                            placeholder="พิมพ์ข้อความ... (Enter ส่ง, Shift+Enter ขึ้นบรรทัดใหม่)"
+                            rows="1"
+                        ></textarea>
+                    </div>
+                    <button id="voice-btn" class="icon-btn" title="พูด (Voice Input)">🎤</button>
+                    <button id="send-btn" class="send-btn" title="ส่ง">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">
+                    <span>Enter ส่ง</span>
+                    <span>Shift+Enter ขึ้นบรรทัด</span>
+                    <span id="token-count">0 tokens</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Hidden file input -->
+    <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.txt,.md,.json,.csv" style="display:none">
+
+    <!-- Voice Recording Modal -->
+    <div id="voice-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="voice-visualizer">
+                <div class="voice-wave">
+                    <span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <p>กำลังฟัง...</p>
+            </div>
+            <button id="stop-voice-btn" class="action-btn">หยุดบันทึก</button>
+        </div>
+    </div>
+
+    <!-- Image Generation Modal -->
+    <div id="image-modal" class="modal hidden">
+        <div class="modal-content wide">
+            <div class="modal-header">
+                <h2>🎨 สร้างรูป</h2>
+                <button class="icon-btn close-modal">✕</button>
+            </div>
+            <div class="image-gen-form">
+                <textarea id="image-prompt" placeholder="อธิบายรูปที่ต้องการ... เช่น Aries warrior duck in crimson armor, cinematic lighting, 4K"></textarea>
+                <div class="image-options">
+                    <select id="image-style">
+                        <option value="cinematic">Cinematic</option>
+                        <option value="anime">Anime</option>
+                        <option value="photorealistic">Photorealistic</option>
+                        <option value="digital-art">Digital Art</option>
+                        <option value="oil-painting">Oil Painting</option>
+                    </select>
+                    <select id="image-size">
+                        <option value="512x512">512×512</option>
+                        <option value="1024x1024" selected>1024×1024</option>
+                        <option value="1024x768">1024×768</option>
+                        <option value="768x1024">768×1024</option>
+                    </select>
+                </div>
+                <button id="generate-image-btn" class="action-btn">สร้างรูป</button>
+            </div>
+            <div id="image-result" class="image-result"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
