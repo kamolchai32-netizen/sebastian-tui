@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 8888;
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// Serve TUI frontend
-app.use("/tui", express.static(__dirname));
+// Serve TUI frontend from same directory - no cache
+app.use("/tui", express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
 app.get("/tui", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/", (req, res) => res.redirect("/tui"));
 
