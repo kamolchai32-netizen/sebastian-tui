@@ -11,9 +11,10 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Serve TUI frontend
-const TUI_DIR = __dirname.replace("/server", "");
+const TUI_DIR = path.resolve(__dirname);
 app.use("/tui", express.static(TUI_DIR));
 app.get("/tui", (req, res) => res.sendFile(path.join(TUI_DIR, "index.html")));
+app.get("/", (req, res) => res.redirect("/tui"));
 
 // Health check
 app.get("/api/health", (req, res) => {
