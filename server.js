@@ -20,7 +20,7 @@ app.get("/api/health", (req, res) => res.json({ status: "ok", ts: Date.now() }))
 app.post("/api/chat", function(req, res) {
     const message = req.body.message || "";
     const messages = req.body.messages || [];
-    const model = req.body.model && req.body.model !== "auto" ? req.body.model : "meta-llama/llama-3.2-11b-vision-instruct:free";
+    const model = req.body.model && req.body.model !== "auto" ? req.body.model : "mistralai/mistral-nemo";
     const imageBase64 = req.body.imageBase64 || null;
     const apiKey = process.env.OPENROUTER_API_KEY;
 
