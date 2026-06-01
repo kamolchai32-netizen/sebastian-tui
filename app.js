@@ -268,8 +268,8 @@
 
         // Determine model
         let model = state.model;
-        if (model === "auto") {
-            model = "model-router";
+        if (!model || model === "auto") {
+            model = "nvidia/nemotron-3-super-120b-a12b:free";
         }
 
         try {
