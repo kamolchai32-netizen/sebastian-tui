@@ -7,6 +7,13 @@ const PORT = process.env.PORT || 8888;
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+// Disable all caching
+app.use(function(req, res, next) {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    next();
+});
 
 // Serve TUI frontend from same directory - no cache
 app.use("/tui", express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
