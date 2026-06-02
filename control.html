@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sebastian Control Center</title>
+    <link rel="stylesheet" href="control.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">◆</span>
+                    <span class="logo-text">Sebastian</span>
+                </div>
+            </div>
+
+            <nav id="main-nav">
+                <button class="nav-item active" data-page="chat">
+                    <span class="nav-icon">💬</span>
+                    <span class="nav-label">แชท</span>
+                </button>
+                <button class="nav-item" data-page="kanban">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-label">งาน</span>
+                </button>
+                <button class="nav-item" data-page="image">
+                    <span class="nav-icon">🎨</span>
+                    <span class="nav-label">สร้างรูป</span>
+                </button>
+                <button class="nav-item" data-page="models">
+                    <span class="nav-icon">🧠</span>
+                    <span class="nav-label">โมเดล</span>
+                </button>
+                <button class="nav-item" data-page="skills">
+                    <span class="nav-icon">⚡</span>
+                    <span class="nav-label">สกิล</span>
+                </button>
+                <button class="nav-item" data-page="memory">
+                    <span class="nav-icon">📝</span>
+                    <span class="nav-label">ความจำ</span>
+                </button>
+                <button class="nav-item" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">ตั้งค่า</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-dot online"></div>
+                <span id="status-text">พร้อมใช้งาน</span>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main id="main">
+            <!-- Chat Page -->
+            <section id="page-chat" class="page active">
+                <header class="page-header">
+                    <h1>💬 แชทกับ Sebastian</h1>
+                    <div class="header-actions">
+                        <select id="chat-model-select" class="model-select">
+                            <option value="auto">🧠 Auto (เลือกอัตโนมัติ)</option>
+                            <option value="nvidia/nemotron-3-super-120b-a12b:free">Nemotron Super (ฟรี)</option>
+                            <option value="moonshotai/kimi-k2.6:free">Kimi K2.6 (ฟรี)</option>
+                            <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B (ฟรี)</option>
+                            <option value="llama3.2:3b">Llama 3.2 (Local)</option>
+                            <option value="gemma4:e2b">Gemma 4 (Local)</option>
+                        </select>
+                        <button id="new-chat-btn" class="btn small">+ แชทใหม่</button>
+                    </div>
+                </header>
+
+                <div id="chat-messages">
+                    <div class="welcome">
+                        <div class="welcome-logo">◆</div>
+                        <h2>สวัสดี, Diamond</h2>
+                        <p>ผม Sebastian — พร้อมช่วยทุกงาน</p>
+                        <div class="quick-actions">
+                            <button class="quick-btn" data-prompt="ช่วยวางแผนคอนเทนต์ YouTube สัปดาห์นี้">📹 วางแผน YouTube</button>
+                            <button class="quick-btn" data-prompt="สร้างรูป Aries character สำหรับ Etsy">🎨 สร้างรูป Aries</button>
+                            <button class="quick-btn" data-prompt="ดูงานที่ค้างอยู่">📋 ดูงานค้าง</button>
+                            <button class="quick-btn" data-prompt="สรุปสถานะโปรเจกต์ Sebastian">📊 สรุปโปรเจกต์</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="chat-input-area">
+                    <div id="chat-attachments"></div>
+                    <div class="input-row">
+                        <button id="attach-btn" class="icon-btn" title="แนบไฟล์">📎</button>
+                        <textarea id="chat-input" placeholder="พิมพ์ข้อความ... (Enter ส่ง)" rows="1"></textarea>
+                        <button id="voice-btn" class="icon-btn" title="พูด">🎤</button>
+                        <button id="send-btn" class="send-btn">➤</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Kanban Page -->
+            <section id="page-kanban" class="page">
+                <header class="page-header">
+                    <h1>📋 กระดานงาน</h1>
+                    <button id="add-task-btn" class="btn">+ เพิ่มงาน</button>
+                </header>
+                <div class="kanban-board">
+                    <div class="kanban-col">
+                        <h3>To Do <span class="count" id="todo-count">0</span></h3>
+                        <div class="kanban-content" id="todo-tasks"></div>
+                    </div>
+                    <div class="kanban-col">
+                        <h3>In Progress <span class="count" id="inprogress-count">0</span></h3>
+                        <div class="kanban-content" id="inprogress-tasks"></div>
+                    </div>
+                    <div class="kanban-col">
+                        <h3>Done <span class="count" id="done-count">0</span></h3>
+                        <div class="kanban-content" id="done-tasks"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Image Generation Page -->
+            <section id="page-image" class="page">
+                <header class="page-header">
+                    <h1>🎨 สร้างรูป</h1>
+                </header>
+                <div class="image-gen-panel">
+                    <textarea id="image-prompt" placeholder="อธิบายรูปที่ต้องการ... เช่น Aries warrior duck in crimson armor, cinematic lighting"></textarea>
+                    <div class="image-options">
+                        <select id="image-style">
+                            <option value="cinematic">Cinematic</option>
+                            <option value="anime">Anime</option>
+                            <option value="photorealistic">Photorealistic</option>
+                            <option value="digital-art">Digital Art</option>
+                        </select>
+                        <select id="image-size">
+                            <option value="512x512">512×512</option>
+                            <option value="1024x1024" selected>1024×1024</option>
+                        </select>
+                        <button id="generate-btn" class="btn primary">สร้างรูป</button>
+                    </div>
+                    <div id="image-result"></div>
+                </div>
+            </section>
+
+            <!-- Models Page -->
+            <section id="page-models" class="page">
+                <header class="page-header">
+                    <h1>🧠 จัดการโมเดล</h1>
+                </header>
+                <div class="models-panel">
+                    <div class="model-group">
+                        <h3>☁️ Cloud Models (ฟรี)</h3>
+                        <div class="model-list" id="cloud-models"></div>
+                    </div>
+                    <div class="model-group">
+                        <h3>💻 Local Models</h3>
+                        <div class="model-list" id="local-models"></div>
+                    </div>
+                    <div class="model-group">
+                        <h3>⚙️ Auto Switching Rules</h3>
+                        <div class="rules-list" id="model-rules"></div>
+                        <button id="add-rule-btn" class="btn small">+ เพิ่มกฎ</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Skills Page -->
+            <section id="page-skills" class="page">
+                <header class="page-header">
+                    <h1>⚡ สกิล</h1>
+                </header>
+                <div class="skills-grid" id="skills-grid"></div>
+            </section>
+
+            <!-- Memory Page -->
+            <section id="page-memory" class="page">
+                <header class="page-header">
+                    <h1>📝 ความจำ</h1>
+                    <button id="add-memory-btn" class="btn">+ เพิ่ม</button>
+                </header>
+                <div class="memory-tabs">
+                    <button class="tab active" data-tab="soul">Soul.md</button>
+                    <button class="tab" data-tab="decisions">Decisions</button>
+                    <button class="tab" data-tab="history">Chat History</button>
+                </div>
+                <div id="memory-content"></div>
+            </section>
+
+            <!-- Settings Page -->
+            <section id="page-settings" class="page">
+                <header class="page-header">
+                    <h1>⚙️ ตั้งค่า</h1>
+                </header>
+                <div class="settings-panel">
+                    <div class="setting-group">
+                        <h3>API Keys</h3>
+                        <div class="setting-item">
+                            <label>OpenRouter API Key</label>
+                            <input type="password" id="setting-openrouter-key" placeholder="sk-or-v1-...">
+                        </div>
+                        <div class="setting-item">
+                            <label>Leonardo API Key</label>
+                            <input type="password" id="setting-leonardo-key" placeholder="...">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <h3>Telegram</h3>
+                        <div class="setting-item">
+                            <label>Bot Token</label>
+                            <input type="text" id="setting-telegram-token" placeholder="123456:ABC...">
+                        </div>
+                        <button id="setup-telegram-btn" class="btn">Setup Webhook</button>
+                    </div>
+                    <div class="setting-group">
+                        <h3>Google Sheets</h3>
+                        <div class="setting-item">
+                            <label>Spreadsheet ID</label>
+                            <input type="text" id="setting-sheets-id" placeholder="...">
+                        </div>
+                        <div class="setting-item">
+                            <label>GAS Web App URL</label>
+                            <input type="text" id="setting-gas-url" placeholder="https://script.google.com/...">
+                        </div>
+                    </div>
+                    <button id="save-settings-btn" class="btn primary">บันทึก</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    <script src="control.js"></script>
+</body>
+</html>

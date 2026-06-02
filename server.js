@@ -18,7 +18,8 @@ app.use(function(req, res, next) {
 
 app.use("/tui", express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
 app.get("/tui", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get("/", (req, res) => res.redirect("/tui"));
+app.get("/control", (req, res) => res.sendFile(path.join(__dirname, "control.html")));
+app.get("/", (req, res) => res.redirect("/control"));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok", ts: Date.now() }));
 
