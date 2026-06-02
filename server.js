@@ -1,7 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fetch = require("node:http");
+const https = require("https");
+const http = require("http");
 
 const app = express();
 const PORT = process.env.PORT || 8888;
@@ -23,6 +24,37 @@ app.get("/", (req, res) => res.redirect("/control"));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok", ts: Date.now() }));
 
+// Helper: HTTP request using built-in modules
+function httpRequest(url, options, body) {
+    return new Promise((resolve, reject) => {
+        const mod = url.startsWith("https") ? https : http;
+        const req = mod.request(url, options, (res) => {
+            let data = "";
+            res.on("data", chunk => data += chunk);
+            res.on("end", () => {
+                try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
+                catch { resolve({ status: res.statusCode, data }); }
+            });
+        });
+        req.on("error", reject);
+        req.setTimeout(60000, () => { req.destroy(); reject(new Error("timeout")); });
+        if (body) req.write(body);
+        req.end();
+    });
+}
+
+// Helper: Download file to base64
+function downloadFile(url) {
+    return new Promise((resolve, reject) => {
+        const mod = url.startsWith("https") ? https : http;
+        mod.get(url, (res) => {
+            const chunks = [];
+            res.on("data", chunk => chunks.push(chunk));
+            res.on("end", () => resolve(Buffer.concat(chunks).toString("base64")));
+        }).on("error", reject);
+    });
+}
+
 // ===== TELEGRAM WEBHOOK =====
 app.post("/telegram/webhook", async (req, res) => {
     try {
@@ -33,60 +65,31 @@ app.post("/telegram/webhook", async (req, res) => {
         const text = update.message.text || "";
         const photo = update.message.photo;
 
-        console.log("telegram msg:", chatId, text.substring(0, 50));
+        console.log("telegram:", chatId, text.substring(0, 50));
 
-        // Get image if present
         let imageBase64 = null;
         if (photo && photo.length > 0) {
-            const fileId = photo[photo.length - 1].file_id;
-            const fileResp = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
-            const fileData = await fileResp.json();
-            if (fileData.ok) {
-                const filePath = fileData.result.file_path;
-                const imgResp = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`);
-                const imgBuffer = await imgResp.arrayBuffer();
-                imageBase64 = "data:image/jpeg;base64," + Buffer.from(imgBuffer).toString("base64");
-            }
+            try {
+                const fileId = photo[photo.length - 1].file_id;
+                const fileData = await httpRequest(`${TELEGRAM_API}/getFile?file_id=${fileId}`, { method: "GET" });
+                if (fileData.data && fileData.data.ok) {
+                    const filePath = fileData.data.result.file_path;
+                    const imgBase64 = await downloadFile(`https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`);
+                    imageBase64 = "data:image/jpeg;base64," + imgBase64;
+                }
+            } catch (e) { console.error("img error:", e.message); }
         }
 
-        // Call AI
-        const msgs = [
-            { role: "system", content: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง ช่วยเหลือด้านโปรเจกต์ Sebastian YouTube Etsy และงานคลินิกออร์โธติกส์" }
-        ];
-        if (imageBase64) {
-            msgs.push({ role: "user", content: [{ type: "text", text: text || "บอกอะไรหน่อยเกี่ยวกับรูปนี้" }, { type: "image_url", image_url: { url: imageBase64 } }] });
-        } else {
-            msgs.push({ role: "user", content: text });
-        }
+        const reply = await callAI(text || "สวัสดี", imageBase64);
 
-        const aiResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        await httpRequest(`${TELEGRAM_API}/sendMessage`, {
             method: "POST",
-            headers: {
-                "Authorization": "Bearer " + (process.env.OPENROUTER_API_KEY || ""),
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://sebastian-tui.onrender.com",
-                "X-Title": "Sebastian AI"
-            },
-            body: JSON.stringify({ model: "nvidia/nemotron-3-super-120b-a12b:free", messages: msgs }),
-            signal: AbortSignal.timeout(60000),
-        });
-
-        let reply = "⚠️ ไม่สามารถตอบได้";
-        if (aiResp.ok) {
-            const data = await aiResp.json();
-            reply = data.choices?.[0]?.message?.content || reply;
-        }
-
-        // Send reply to Telegram
-        await fetch(`${TELEGRAM_API}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, text: reply }),
-        });
+            headers: { "Content-Type": "application/json" }
+        }, JSON.stringify({ chat_id: chatId, text: reply }));
 
         res.sendStatus(200);
     } catch (err) {
-        console.error("telegram error:", err);
+        console.error("telegram error:", err.message);
         res.sendStatus(200);
     }
 });
@@ -94,63 +97,63 @@ app.post("/telegram/webhook", async (req, res) => {
 // Set webhook
 app.get("/telegram/setup", async (req, res) => {
     const webhookUrl = `https://sebastian-tui.onrender.com/telegram/webhook`;
-    const resp = await fetch(`${TELEGRAM_API}/setWebhook?url=${webhookUrl}`);
-    const data = await resp.json();
-    res.json(data);
+    const data = await httpRequest(`${TELEGRAM_API}/setWebhook?url=${webhookUrl}`, { method: "GET" });
+    res.json(data.data);
 });
 
-// ===== CHAT API (for TUI web) =====
-const LOCAL_MODELS = ["llama3.2:3b", "gemma4:e2b", "llava:7b"];
-const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+// ===== AI CALL =====
+async function callAI(message, imageBase64) {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return "⚠️ ต้องตั้งค่า OPENROUTER_API_KEY";
 
+    const msgs = [
+        { role: "system", content: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง ช่วยเหลือด้านโปรเจกต์ Sebastian YouTube Etsy และงานคลินิกออร์โธติกส์" }
+    ];
+
+    if (imageBase64) {
+        msgs.push({ role: "user", content: [
+            { type: "text", text: message || "บอกอะไรหน่อยเกี่ยวกับรูปนี้" },
+            { type: "image_url", image_url: { url: imageBase64 } }
+        ]});
+    } else {
+        msgs.push({ role: "user", content: message });
+    }
+
+    const body = JSON.stringify({ model: "nvidia/nemotron-3-super-120b-a12b:free", messages: msgs });
+
+    const result = await httpRequest("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            "Authorization": "Bearer " + apiKey,
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body)
+        }
+    }, body);
+
+    if (result.data && result.data.choices && result.data.choices[0]) {
+        return result.data.choices[0].message.content;
+    }
+    if (result.data && result.data.error) {
+        return "⚠️ " + (result.data.error.message || JSON.stringify(result.data.error));
+    }
+    return "⚠️ ไม่ได้รับคำตอบ: " + JSON.stringify(result.data).substring(0, 200);
+}
+
+// ===== CHAT API =====
 app.post("/api/chat", async (req, res) => {
     try {
-        const { message, messages, model, imageBase64 } = req.body;
-        if (!message && !imageBase64) return res.json({ response: "กรุณาพิมพ์ข้อความก่อน" });
+        const { message, imageBase64 } = req.body;
+        if (!message && !imageBase64) return res.json({ response: "กรุณาพิมพ์ข้อความ" });
 
-        const useModel = model && model !== "auto" ? model : DEFAULT_MODEL;
-        const isLocal = LOCAL_MODELS.includes(useModel);
-
-        const msgs = [
-            { role: "system", content: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง" }
-        ];
-        if (messages && messages.length > 0) {
-            messages.slice(-8).forEach(m => {
-                if ((m.role === "user" || m.role === "assistant") && m.content && !m.content.startsWith("[")) {
-                    msgs.push({ role: m.role, content: m.content });
-                }
-            });
-        }
-        if (imageBase64) {
-            const parts = [];
-            if (message) parts.push({ type: "text", text: message });
-            else parts.push({ type: "text", text: "บอกอะไรหน่อยเกี่ยวกับรูปนี้" });
-            parts.push({ type: "image_url", image_url: { url: imageBase64 } });
-            msgs.push({ role: "user", content: parts });
-        } else {
-            msgs.push({ role: "user", content: message || "สวัสดี" });
-        }
-
-        const apiKey = process.env.OPENROUTER_API_KEY;
-        if (!apiKey) return res.json({ response: "⚠️ ต้องตั้งค่า OPENROUTER_API_KEY" });
-
-        const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: useModel, messages: msgs }),
-            signal: AbortSignal.timeout(60000),
-        });
-
-        if (!resp.ok) {
-            const errText = await resp.text();
-            return res.json({ response: "⚠️ " + resp.status + ": " + errText.substring(0, 200) });
-        }
-
-        const data = await resp.json();
-        res.json({ response: data.choices?.[0]?.message?.content || "ไม่ได้รับคำตอบ", model: useModel });
+        const reply = await callAI(message || "สวัสดี", imageBase64);
+        res.json({ response: reply });
     } catch (err) {
+        console.error("chat error:", err.message);
         res.json({ response: "⚠️ " + err.message });
     }
 });
 
-app.listen(PORT, () => console.log("Sebastian TUI v3 + Telegram on port " + PORT));
+app.listen(PORT, () => {
+    console.log("Sebastian TUI v4 on port " + PORT);
+    console.log("OPENROUTER_API_KEY:", process.env.OPENROUTER_API_KEY ? "SET" : "MISSING");
+});
