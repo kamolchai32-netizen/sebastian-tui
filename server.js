@@ -119,7 +119,7 @@ async function callAI(message, imageBase64) {
         msgs.push({ role: "user", content: message });
     }
 
-    const body = JSON.stringify({ model: "nvidia/nemotron-3-super-120b-a12b:free", messages: msgs });
+    const body = JSON.stringify({ model: "google/gemma-2-9b-it:free", messages: msgs });
 
     const result = await httpRequest("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
