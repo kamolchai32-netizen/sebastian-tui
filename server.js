@@ -17,7 +17,6 @@ app.use(function(req, res, next) {
     next();
 });
 
-// Serve all static files from root
 app.use(express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
 app.get("/tui", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/control", (req, res) => res.sendFile(path.join(__dirname, "control.html")));
@@ -25,7 +24,7 @@ app.get("/", (req, res) => res.redirect("/control"));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok", ts: Date.now() }));
 
-// Helper: HTTP request using built-in modules
+// Helper: HTTP request
 function httpRequest(url, options, body) {
     return new Promise((resolve, reject) => {
         const mod = url.startsWith("https") ? https : http;
@@ -44,11 +43,9 @@ function httpRequest(url, options, body) {
     });
 }
 
-// Helper: Download file to base64
 function downloadFile(url) {
     return new Promise((resolve, reject) => {
-        const mod = url.startsWith("https") ? https : http;
-        mod.get(url, (res) => {
+        https.get(url, (res) => {
             const chunks = [];
             res.on("data", chunk => chunks.push(chunk));
             res.on("end", () => resolve(Buffer.concat(chunks).toString("base64")));
@@ -56,16 +53,44 @@ function downloadFile(url) {
     });
 }
 
+// ===== GOOGLE SHEETS API =====
+async function sheetsRead(spreadsheetId, range) {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${apiKey}`;
+    const result = await httpRequest(url, { method: "GET" });
+    return result.data;
+}
+
+async function sheetsWrite(spreadsheetId, range, values) {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW&key=${apiKey}`;
+    const body = JSON.stringify({ values });
+    const result = await httpRequest(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
+    }, body);
+    return result.data;
+}
+
+// ===== GOOGLE CALENDAR API =====
+async function calendarList() {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?key=${apiKey}&maxResults=10&orderBy=startTime&singleEvents=true&timeMin=${new Date().toISOString()}`;
+    const result = await httpRequest(url, { method: "GET" });
+    return result.data;
+}
+
 // ===== TELEGRAM WEBHOOK =====
 app.post("/telegram/webhook", async (req, res) => {
     try {
         const update = req.body;
         if (!update.message) return res.sendStatus(200);
-
         const chatId = update.message.chat.id;
         const text = update.message.text || "";
         const photo = update.message.photo;
-
         console.log("telegram:", chatId, text.substring(0, 50));
 
         let imageBase64 = null;
@@ -82,12 +107,10 @@ app.post("/telegram/webhook", async (req, res) => {
         }
 
         const reply = await callAI(text || "สวัสดี", imageBase64);
-
         await httpRequest(`${TELEGRAM_API}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" }
         }, JSON.stringify({ chat_id: chatId, text: reply }));
-
         res.sendStatus(200);
     } catch (err) {
         console.error("telegram error:", err.message);
@@ -95,7 +118,6 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 });
 
-// Set webhook
 app.get("/telegram/setup", async (req, res) => {
     const webhookUrl = `https://sebastian-tui.onrender.com/telegram/webhook`;
     const data = await httpRequest(`${TELEGRAM_API}/setWebhook?url=${webhookUrl}`, { method: "GET" });
@@ -121,22 +143,13 @@ async function callAI(message, imageBase64) {
     }
 
     const body = JSON.stringify({ model: "moonshotai/kimi-k2.6:free", messages: msgs });
-
     const result = await httpRequest("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-            "Authorization": "Bearer " + apiKey,
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(body)
-        }
+        headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
     }, body);
 
-    if (result.data && result.data.choices && result.data.choices[0]) {
-        return result.data.choices[0].message.content;
-    }
-    if (result.data && result.data.error) {
-        return "⚠️ " + (result.data.error.message || JSON.stringify(result.data.error));
-    }
+    if (result.data && result.data.choices && result.data.choices[0]) return result.data.choices[0].message.content;
+    if (result.data && result.data.error) return "⚠️ " + (result.data.error.message || JSON.stringify(result.data.error));
     return "⚠️ ไม่ได้รับคำตอบ: " + JSON.stringify(result.data).substring(0, 200);
 }
 
@@ -145,16 +158,40 @@ app.post("/api/chat", async (req, res) => {
     try {
         const { message, imageBase64 } = req.body;
         if (!message && !imageBase64) return res.json({ response: "กรุณาพิมพ์ข้อความ" });
-
         const reply = await callAI(message || "สวัสดี", imageBase64);
         res.json({ response: reply });
     } catch (err) {
-        console.error("chat error:", err.message);
         res.json({ response: "⚠️ " + err.message });
     }
 });
 
+// ===== GOOGLE SHEETS API =====
+app.get("/api/sheets/read", async (req, res) => {
+    try {
+        const { spreadsheetId, range } = req.query;
+        const data = await sheetsRead(spreadsheetId, range || "A1:Z100");
+        res.json(data);
+    } catch (err) { res.json({ error: err.message }); }
+});
+
+app.post("/api/sheets/write", async (req, res) => {
+    try {
+        const { spreadsheetId, range, values } = req.body;
+        const data = await sheetsWrite(spreadsheetId, range, values);
+        res.json(data);
+    } catch (err) { res.json({ error: err.message }); }
+});
+
+// ===== GOOGLE CALENDAR API =====
+app.get("/api/calendar/events", async (req, res) => {
+    try {
+        const data = await calendarList();
+        res.json(data);
+    } catch (err) { res.json({ error: err.message }); }
+});
+
 app.listen(PORT, () => {
-    console.log("Sebastian TUI v4 on port " + PORT);
+    console.log("Sebastian TUI v5 on port " + PORT);
     console.log("OPENROUTER_API_KEY:", process.env.OPENROUTER_API_KEY ? "SET" : "MISSING");
+    console.log("GOOGLE_API_KEY:", process.env.GOOGLE_API_KEY ? "SET" : "MISSING");
 });
