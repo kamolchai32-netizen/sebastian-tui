@@ -17,7 +17,8 @@ app.use(function(req, res, next) {
     next();
 });
 
-app.use("/tui", express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
+// Serve all static files from root
+app.use(express.static(__dirname, { etag: false, lastModified: false, cacheControl: false, maxAge: 0 }));
 app.get("/tui", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/control", (req, res) => res.sendFile(path.join(__dirname, "control.html")));
 app.get("/", (req, res) => res.redirect("/control"));
