@@ -24,7 +24,6 @@ app.get("/", (req, res) => res.redirect("/control"));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok", ts: Date.now() }));
 
-// Helper: HTTP request
 function httpRequest(url, options, body) {
     return new Promise((resolve, reject) => {
         const mod = url.startsWith("https") ? https : http;
@@ -53,34 +52,92 @@ function downloadFile(url) {
     });
 }
 
-// ===== GOOGLE SHEETS API =====
-async function sheetsRead(spreadsheetId, range) {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?key=${apiKey}`;
-    const result = await httpRequest(url, { method: "GET" });
-    return result.data;
-}
+// ===== MULTI-API AI CALL =====
+// Auto-failsafe: Gemini → OpenRouter → Ollama
+async function callAI(message, imageBase64, preferredModel) {
+    const msgs = [
+        { role: "system", content: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง ช่วยเหลือด้านโปรเจกต์ Sebastian YouTube Etsy และงานคลินิกออร์โธติกส์" }
+    ];
+    if (imageBase64) {
+        msgs.push({ role: "user", content: [
+            { type: "text", text: message || "บอกอะไรหน่อยเกี่ยวกับรูปนี้" },
+            { type: "image_url", image_url: { url: imageBase64 } }
+        ]});
+    } else {
+        msgs.push({ role: "user", content: message });
+    }
 
-async function sheetsWrite(spreadsheetId, range, values) {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=RAW&key=${apiKey}`;
-    const body = JSON.stringify({ values });
-    const result = await httpRequest(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
-    }, body);
-    return result.data;
-}
+    // Determine which API to use based on model
+    const LOCAL_MODELS = ["llama3.2:3b", "gemma4:e2b", "llava:7b"];
+    const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemma-4-26b"];
 
-// ===== GOOGLE CALENDAR API =====
-async function calendarList() {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) return { error: "GOOGLE_API_KEY not set" };
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?key=${apiKey}&maxResults=10&orderBy=startTime&singleEvents=true&timeMin=${new Date().toISOString()}`;
-    const result = await httpRequest(url, { method: "GET" });
-    return result.data;
+    let useModel = preferredModel || "gemini-2.5-flash";
+    if (useModel === "auto") useModel = "gemini-2.5-flash";
+
+    const isLocal = LOCAL_MODELS.includes(useModel);
+    const isGemini = GEMINI_MODELS.includes(useModel) || useModel.startsWith("gemini") || useModel.startsWith("gemma");
+
+    // Try Gemini first (if selected)
+    if (isGemini) {
+        const geminiKey = process.env.GEMINI_API_KEY || "AIzaSyCgTfx9x7u9vbNpp6ZX14BTI3jaWB8vHiE";
+        const geminiModel = useModel.startsWith("gemma") ? "gemma-3-27b-it" : useModel;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+
+        const geminiBody = {
+            contents: [{ parts: [{ text: message }] }],
+            systemInstruction: { parts: [{ text: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง" }] }
+        };
+
+        try {
+            const result = await httpRequest(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(JSON.stringify(geminiBody)) }
+            }, JSON.stringify(geminiBody));
+
+            if (result.data && result.data.candidates && result.data.candidates[0]) {
+                return { text: result.data.candidates[0].content.parts[0].text, model: geminiModel, source: "gemini" };
+            }
+        } catch (e) {
+            console.log("Gemini failed:", e.message);
+        }
+    }
+
+    // Try OpenRouter (fallback)
+    const orKey = process.env.OPENROUTER_API_KEY;
+    if (orKey && !isLocal) {
+        const orModel = useModel === "auto" ? "moonshotai/kimi-k2.6:free" : useModel;
+        const body = JSON.stringify({ model: orModel, messages: msgs });
+        try {
+            const result = await httpRequest("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + orKey, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
+            }, body);
+            if (result.data && result.data.choices && result.data.choices[0]) {
+                return { text: result.data.choices[0].message.content, model: orModel, source: "openrouter" };
+            }
+        } catch (e) {
+            console.log("OpenRouter failed:", e.message);
+        }
+    }
+
+    // Try Ollama (local, last resort)
+    if (isLocal) {
+        const ollamaUrl = (process.env.OLLAMA_URL || "http://127.0.0.1:11434") + "/api/chat";
+        const body = JSON.stringify({ model: useModel, messages: msgs, stream: false });
+        try {
+            const result = await httpRequest(ollamaUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
+            }, body);
+            if (result.data && result.data.message) {
+                return { text: result.data.message.content, model: useModel, source: "ollama" };
+            }
+        } catch (e) {
+            console.log("Ollama failed:", e.message);
+        }
+    }
+
+    return { text: "⚠️ ไม่สามารถตอบได้ — ทุก API ล้มเหลว", model: "none", source: "error" };
 }
 
 // ===== TELEGRAM WEBHOOK =====
@@ -91,7 +148,6 @@ app.post("/telegram/webhook", async (req, res) => {
         const chatId = update.message.chat.id;
         const text = update.message.text || "";
         const photo = update.message.photo;
-        console.log("telegram:", chatId, text.substring(0, 50));
 
         let imageBase64 = null;
         if (photo && photo.length > 0) {
@@ -106,11 +162,11 @@ app.post("/telegram/webhook", async (req, res) => {
             } catch (e) { console.error("img error:", e.message); }
         }
 
-        const reply = await callAI(text || "สวัสดี", imageBase64);
+        const result = await callAI(text || "สวัสดี", imageBase64);
         await httpRequest(`${TELEGRAM_API}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" }
-        }, JSON.stringify({ chat_id: chatId, text: reply }));
+        }, JSON.stringify({ chat_id: chatId, text: result.text }));
         res.sendStatus(200);
     } catch (err) {
         console.error("telegram error:", err.message);
@@ -119,79 +175,34 @@ app.post("/telegram/webhook", async (req, res) => {
 });
 
 app.get("/telegram/setup", async (req, res) => {
-    const webhookUrl = `https://sebastian-tui.onrender.com/telegram/webhook`;
-    const data = await httpRequest(`${TELEGRAM_API}/setWebhook?url=${webhookUrl}`, { method: "GET" });
+    const data = await httpRequest(`${TELEGRAM_API}/setWebhook?url=https://sebastian-tui.onrender.com/telegram/webhook`, { method: "GET" });
     res.json(data.data);
 });
-
-// ===== AI CALL =====
-async function callAI(message, imageBase64) {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return "⚠️ ต้องตั้งค่า OPENROUTER_API_KEY";
-
-    const msgs = [
-        { role: "system", content: "คุณคือ Sebastian ผู้ช่วย AI ส่วนตัวของ Diamond ตอบเป็นภาษาไทย สุภาพ เป็นกันเอง ช่วยเหลือด้านโปรเจกต์ Sebastian YouTube Etsy และงานคลินิกออร์โธติกส์" }
-    ];
-
-    if (imageBase64) {
-        msgs.push({ role: "user", content: [
-            { type: "text", text: message || "บอกอะไรหน่อยเกี่ยวกับรูปนี้" },
-            { type: "image_url", image_url: { url: imageBase64 } }
-        ]});
-    } else {
-        msgs.push({ role: "user", content: message });
-    }
-
-    const body = JSON.stringify({ model: "moonshotai/kimi-k2.6:free", messages: msgs });
-    const result = await httpRequest("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
-    }, body);
-
-    if (result.data && result.data.choices && result.data.choices[0]) return result.data.choices[0].message.content;
-    if (result.data && result.data.error) return "⚠️ " + (result.data.error.message || JSON.stringify(result.data.error));
-    return "⚠️ ไม่ได้รับคำตอบ: " + JSON.stringify(result.data).substring(0, 200);
-}
 
 // ===== CHAT API =====
 app.post("/api/chat", async (req, res) => {
     try {
-        const { message, imageBase64 } = req.body;
+        const { message, imageBase64, model } = req.body;
         if (!message && !imageBase64) return res.json({ response: "กรุณาพิมพ์ข้อความ" });
-        const reply = await callAI(message || "สวัสดี", imageBase64);
-        res.json({ response: reply });
+        const result = await callAI(message || "สวัสดี", imageBase64, model);
+        res.json({ response: result.text, model: result.model, source: result.source });
     } catch (err) {
         res.json({ response: "⚠️ " + err.message });
     }
 });
 
-// ===== GOOGLE SHEETS API =====
-app.get("/api/sheets/read", async (req, res) => {
+// ===== GOOGLE SHEETS (simple, no OAuth needed if sheet is public) =====
+app.get("/api/sheets/:sheetId/:range", async (req, res) => {
     try {
-        const { spreadsheetId, range } = req.query;
-        const data = await sheetsRead(spreadsheetId, range || "A1:Z100");
-        res.json(data);
-    } catch (err) { res.json({ error: err.message }); }
-});
-
-app.post("/api/sheets/write", async (req, res) => {
-    try {
-        const { spreadsheetId, range, values } = req.body;
-        const data = await sheetsWrite(spreadsheetId, range, values);
-        res.json(data);
-    } catch (err) { res.json({ error: err.message }); }
-});
-
-// ===== GOOGLE CALENDAR API =====
-app.get("/api/calendar/events", async (req, res) => {
-    try {
-        const data = await calendarList();
-        res.json(data);
+        const { sheetId, range } = req.params;
+        const apiKey = process.env.GOOGLE_API_KEY;
+        if (!apiKey) return res.json({ error: "GOOGLE_API_KEY not set — ใช้ Make.com แทนได้" });
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
+        const result = await httpRequest(url, { method: "GET" });
+        res.json(result.data);
     } catch (err) { res.json({ error: err.message }); }
 });
 
 app.listen(PORT, () => {
-    console.log("Sebastian TUI v5 on port " + PORT);
-    console.log("OPENROUTER_API_KEY:", process.env.OPENROUTER_API_KEY ? "SET" : "MISSING");
-    console.log("GOOGLE_API_KEY:", process.env.GOOGLE_API_KEY ? "SET" : "MISSING");
+    console.log("Sebastian TUI v6 (multi-API) on port " + PORT);
 });
